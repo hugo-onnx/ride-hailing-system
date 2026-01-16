@@ -1,55 +1,91 @@
+import h3
 import json
 import time
+import uuid
 import random
+import logging
+
 from datetime import datetime, timezone
 from confluent_kafka import Producer
-import h3
 
-KAFKA_CONFIG = {"bootstrap.servers": "kafka:9092"}
-TOPIC = "rides.requested.madrid"
+from services.common.config import KAFKA_BOOTSTRAP_SERVERS, CITY
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+KAFKA_CONFIG = {"bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS}
+TOPIC = f"rides.requested.{CITY}"
 MADRID_CENTER = (40.4168, -3.7038)
+LAT_RANGE = 0.02  # ~2.2 km range
+LNG_RANGE = 0.02
+H3_RESOLUTION = 8
+EVENT_INTERVAL = 1.0
 
 def get_producer():
     """Retries connection until Kafka is available"""
     while True:
         try:
             p = Producer(KAFKA_CONFIG)
-            # Push a test poll to check connectivity
             p.poll(0)
-            print("Successfully connected to Kafka")
+            logger.info(f"Successfully connected to Kafka at {KAFKA_BOOTSTRAP_SERVERS}")
             return p
         except Exception as e:
-            print(f"Waiting for Kafka... {e}")
+            logger.warning(f"Waiting for Kafka... {e}")
             time.sleep(3)
 
 def delivery_report(err, msg):
+    """Callback for Kafka message delivery reports"""
     if err is not None:
-        print(f"[ERROR] Delivery failed: {err}")
+        logger.error(f"Delivery failed: {err}")
     else:
-        print(f"[PRODUCED] Partition: {msg.partition()}")
+        logger.info(f"Message delivered to partition {msg.partition()}")
 
-producer = get_producer()
+def generate_ride_event():
+    """Generate a random ride request event"""
+    lat = MADRID_CENTER[0] + random.uniform(-LAT_RANGE, LAT_RANGE)
+    lng = MADRID_CENTER[1] + random.uniform(-LNG_RANGE, LNG_RANGE)
+    
+    h3_index = h3.latlng_to_cell(lat, lng, H3_RESOLUTION)
 
-try:
-    while True:
-        lat = MADRID_CENTER[0] + random.uniform(-0.02, 0.02)
-        lng = MADRID_CENTER[1] + random.uniform(-0.02, 0.02)
-        
-        # Correct H3 v4 function
-        h3_index = h3.latlng_to_cell(lat, lng, 8)
+    event = {
+        "event_id": str(uuid.uuid4()),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "h3_res8": h3_index,
+    }
+    
+    return event
 
-        event = {
-            "event_id": str(random.randint(1000, 9999)),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "h3_res8": h3_index,
-        }
+def main():
+    """Main event producer loop"""
+    producer = get_producer()
+    logger.info(f"Starting event producer for topic: {TOPIC}")
+    
+    try:
+        while True:
+            try:
+                event = generate_ride_event()
+                
+                producer.produce(
+                    topic=TOPIC,
+                    value=json.dumps(event).encode("utf-8"),
+                    callback=delivery_report
+                )
+                producer.poll(0)
+                time.sleep(EVENT_INTERVAL)
+                
+            except Exception as e:
+                logger.error(f"Error producing event: {e}", exc_info=True)
+                time.sleep(1)
+                
+    except KeyboardInterrupt:
+        logger.info("Shutting down event producer...")
+    finally:
+        logger.info("Flushing remaining messages...")
+        producer.flush()
+        logger.info("Event producer stopped")
 
-        producer.produce(
-            topic=TOPIC,
-            value=json.dumps(event).encode("utf-8"),
-            callback=delivery_report
-        )
-        producer.poll(0)
-        time.sleep(1)
-except KeyboardInterrupt:
-    producer.flush()
+if __name__ == "__main__":
+    main()
