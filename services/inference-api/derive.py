@@ -33,9 +33,10 @@ def derive_features(raw: dict) -> dict:
     # Supply/demand ratio (higher = more supply available)
     supply_demand_ratio = safe_div(available_drivers, ride_requests)
 
-    # Surge pressure: 0 = balanced/oversupply, 1 = severe undersupply
-    # Clamped to [0, 1] range
-    surge_pressure = max(0.0, min(1.0, 1.0 - supply_demand_ratio))
+    # If ratio is 3.0 or higher, pressure is 0. 
+    # If ratio drops toward 0, pressure approaches 1.
+    target_ratio = 3.0
+    surge_pressure = max(0.0, min(1.0, (target_ratio - supply_demand_ratio) / target_ratio))
 
     return {
         "ride_requests": ride_requests,
