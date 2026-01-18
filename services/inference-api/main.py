@@ -1,14 +1,15 @@
-import logging
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-
 import h3
 import redis
+import logging
+
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
 
 from services.common.config import REDIS_HOST, REDIS_PORT, CITY
 from features import fetch_window, WINDOWS
 from derive import derive_features
+from pricing import compute_price_multiplier
 
 logging.basicConfig(
     level=logging.INFO,
@@ -162,4 +163,59 @@ def get_features_debug(
         "timestamp": ts.isoformat(),
         "features": feature_vector,
         "raw": raw_snapshots,
+    }
+
+
+@app.post("/v1/pricing/quote")
+def pricing_quote(
+    lat: float,
+    lng: float,
+    timestamp: str | None = None,
+):
+    """
+    Get a dynamic pricing quote for a location.
+    
+    Uses 5-minute window features to compute surge pricing multiplier.
+    
+    Args:
+        lat: Latitude
+        lng: Longitude
+        timestamp: Optional ISO timestamp (defaults to now)
+    
+    Returns:
+        Pricing quote with multiplier and feature breakdown
+    """
+    if timestamp:
+        try:
+            ts = datetime.fromisoformat(timestamp)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid timestamp format")
+    else:
+        ts = datetime.now(timezone.utc)
+    
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+
+    try:
+        h3_index = h3.latlng_to_cell(lat, lng, 8)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid coordinates: {e}")
+
+    raw_5m = fetch_window(
+        redis_client=redis_client,
+        city=CITY,
+        h3_index=h3_index,
+        window=5,
+        ts=ts,
+    )
+
+    features_5m = derive_features(raw_5m)
+    pricing = compute_price_multiplier(features_5m)
+
+    return {
+        "city": CITY,
+        "h3_res8": h3_index,
+        "timestamp": ts.isoformat(),
+        "features": features_5m,
+        "pricing": pricing,
     }
