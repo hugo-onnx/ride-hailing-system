@@ -30,7 +30,7 @@ def evaluate(
     p50 = np.percentile(errors, 50)
     p90 = np.percentile(errors, 90)
     p99 = np.percentile(errors, 99)
-e
+
     return {
         "mae_seconds": round(mae, 1),
         "p50_error_seconds": round(p50, 1),
