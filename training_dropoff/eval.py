@@ -30,8 +30,6 @@ def evaluate(
     p50 = np.percentile(errors, 50)
     p90 = np.percentile(errors, 90)
     p99 = np.percentile(errors, 99)
-    
-    # Also compute MAPE for interpretability
     mape = np.mean(errors / truth) * 100
 
     return {
