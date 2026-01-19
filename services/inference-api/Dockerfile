@@ -15,6 +15,7 @@ COPY services/inference-api/derive.py /app/derive.py
 COPY services/inference-api/pricing.py /app/pricing.py
 COPY services/inference-api/monitoring /app/monitoring
 COPY services/inference-api/eta /app/eta
+COPY services/inference-api/geo /app/geo
 COPY services/inference-api/models /app/models
 
 ENV PYTHONPATH=/app
