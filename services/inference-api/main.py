@@ -15,8 +15,10 @@ from derive import derive_features
 from pricing import compute_price_multiplier
 from monitoring.metrics import record_latency
 from monitoring.drift import record_feature_snapshot
-from eta.model import ETAEstimator
+from eta.pickup_model import ETAEstimator
+from eta.dropoff_model import DropoffETAEstimator
 from eta.features import assemble_eta_features
+from geo.utils import haversine_km
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,14 +28,16 @@ logger = logging.getLogger(__name__)
 
 redis_client: redis.Redis | None = None
 eta_model: ETAEstimator | None = None
+dropoff_model: DropoffETAEstimator | None = None
 
-ETA_MODEL_PATH = "/app/models/eta_model.joblib"
+PICKUP_ETA_MODEL_PATH = "/app/models/eta_model.joblib"
+DROPOFF_ETA_MODEL_PATH = "/app/models/dropoff_model.joblib"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage Redis connection lifecycle."""
-    global redis_client, eta_model
+    global redis_client, eta_model, dropoff_model
     
     redis_client = redis.Redis(
         host=REDIS_HOST,
@@ -51,14 +55,24 @@ async def lifespan(app: FastAPI):
         raise
 
     try:
-        eta_model = ETAEstimator(ETA_MODEL_PATH)
-        logger.info(f"Loaded ETA model from {ETA_MODEL_PATH}")
+        eta_model = ETAEstimator(PICKUP_ETA_MODEL_PATH)
+        logger.info(f"Loaded ETA model from {PICKUP_ETA_MODEL_PATH}")
     except FileNotFoundError:
-        logger.warning(f"ETA model not found at {ETA_MODEL_PATH}, ETA endpoint will be disabled")
+        logger.warning(f"ETA model not found at {PICKUP_ETA_MODEL_PATH}, ETA endpoint will be disabled")
         eta_model = None
     except Exception as e:
         logger.error(f"Failed to load ETA model: {e}")
         eta_model = None
+
+    try:
+        dropoff_model = DropoffETAEstimator(DROPOFF_ETA_MODEL_PATH)
+        logger.info(f"Loaded Dropoff model from {DROPOFF_ETA_MODEL_PATH}")
+    except FileNotFoundError:
+        logger.warning(f"Dropoff model not found at {DROPOFF_ETA_MODEL_PATH}, trip quote endpoint will be disabled")
+        dropoff_model = None
+    except Exception as e:
+        logger.error(f"Failed to load Dropoff model: {e}")
+        dropoff_model = None
 
     yield
     
@@ -366,5 +380,118 @@ def eta_quote(
         "trip_distance_km": trip_distance_km,
         "eta_seconds": int(eta_seconds),
         "eta_minutes": round(eta_seconds / 60, 1),
+        "latency_ms": round(latency_ms, 2),
+    }
+
+
+@app.post("/v1/quote")
+def trip_quote(
+    origin_lat: float,
+    origin_lng: float,
+    dest_lat: float,
+    dest_lng: float,
+    timestamp: str | None = None,
+):
+    """
+    Get a complete trip quote with ETA and pricing.
+    
+    Combines pickup ETA, dropoff ETA, and dynamic pricing for a full
+    trip estimate from origin to destination.
+    
+    Args:
+        origin_lat, origin_lng: Pickup location coordinates
+        dest_lat, dest_lng: Destination coordinates
+        timestamp: Optional ISO timestamp (defaults to now)
+    
+    Returns:
+        Complete trip quote with ETAs and pricing
+    """
+    if eta_model is None or dropoff_model is None:
+        raise HTTPException(
+            status_code=503, 
+            detail="ETA models not loaded. Please ensure model files exist."
+        )
+    
+    start = time.perf_counter()
+
+    if timestamp:
+        try:
+            ts = datetime.fromisoformat(timestamp)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid timestamp format")
+    else:
+        ts = datetime.now(timezone.utc)
+    
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+
+    # --- GEO ---
+    try:
+        h3_origin = h3.latlng_to_cell(origin_lat, origin_lng, 8)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid origin coordinates: {e}")
+    
+    trip_distance_km = haversine_km(
+        origin_lat, origin_lng, dest_lat, dest_lng
+    )
+    
+    if trip_distance_km < 0.1:
+        raise HTTPException(status_code=400, detail="Origin and destination too close")
+
+    # --- FEATURES ---
+    raw_5m = fetch_window(
+        redis_client=redis_client,
+        city=CITY,
+        h3_index=h3_origin,
+        window=5,
+        ts=ts,
+    )
+    features_5m = derive_features(raw_5m)
+
+    # --- PICKUP ETA ---
+    pickup_features = assemble_eta_features(
+        trip_distance_km=trip_distance_km,
+        features_5m=features_5m,
+    )
+    pickup_eta = eta_model.predict(pickup_features)
+
+    # --- DROPOFF ETA ---
+    dropoff_features = {
+        "trip_distance_km": trip_distance_km,
+        "surge_pressure": features_5m["surge_pressure"],
+        "hour_of_day": ts.hour,
+        "is_weekend": ts.weekday() >= 5,
+    }
+    dropoff_eta = dropoff_model.predict(dropoff_features)
+
+    # --- TOTAL ETA ---
+    total_eta = pickup_eta + dropoff_eta
+
+    # --- PRICING ---
+    pricing = compute_price_multiplier(features_5m)
+    base_fare = 1.2  # EUR
+    price_per_km = 1.1  # EUR/km
+    price = (base_fare + trip_distance_km * price_per_km) * pricing["multiplier"]
+
+    # --- MONITORING ---
+    latency_ms = (time.perf_counter() - start) * 1000
+    record_latency(redis_client, "trip_quote", latency_ms)
+
+    return {
+        "city": CITY,
+        "h3_origin": h3_origin,
+        "trip_distance_km": round(trip_distance_km, 2),
+        "eta": {
+            "pickup_seconds": int(pickup_eta),
+            "dropoff_seconds": int(dropoff_eta),
+            "total_seconds": int(total_eta),
+            "total_minutes": round(total_eta / 60, 1),
+        },
+        "price": {
+            "amount_eur": round(price, 2),
+            "multiplier": pricing["multiplier"],
+            "surge_level": pricing["surge_level"],
+            "reasons": pricing["reasons"],
+        },
         "latency_ms": round(latency_ms, 2),
     }
