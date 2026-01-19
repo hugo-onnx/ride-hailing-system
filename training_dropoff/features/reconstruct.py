@@ -17,18 +17,11 @@ def reconstruct_features(trips: pd.DataFrame) -> pd.DataFrame:
         "hour_of_day",
         "is_weekend",
         "dropoff_eta_seconds",
-    ]].copy()
+    ]].dropna()
     
-    # Drop any rows with missing values
-    features = features.dropna()
-    
-    # Ensure correct dtypes
     features["hour_of_day"] = features["hour_of_day"].astype(int)
     features["is_weekend"] = features["is_weekend"].astype(int)
     
-    # Clip ETA to reasonable bounds (1 min to 2 hours)
-    features["dropoff_eta_seconds"] = features[
-        "dropoff_eta_seconds"
-    ].clip(60, 7200)
+    features["dropoff_eta_seconds"] = features["dropoff_eta_seconds"].clip(120, 7200)
 
     return features
