@@ -7,13 +7,13 @@ from pathlib import Path
 from data.schema import FEATURE_COLUMNS, LABEL_COLUMN
 
 
-def train_eta_model(
+def train_pickup_model(
     train_df: pd.DataFrame, 
     val_df: pd.DataFrame, 
     output_path: str
 ) -> xgb.XGBRegressor:
     """
-    Train XGBoost ETA model.
+    Train XGBoost pickup ETA model.
     
     Args:
         train_df: Training dataset
