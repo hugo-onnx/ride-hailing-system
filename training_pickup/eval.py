@@ -30,9 +30,12 @@ def evaluate(
     p50 = np.percentile(errors, 50)
     p90 = np.percentile(errors, 90)
     p99 = np.percentile(errors, 99)
+    mape = np.mean(errors / truth) * 100
 
     return {
         "mae_seconds": round(mae, 1),
+        "mae_minutes": round(mae / 60, 2),
+        "mape_percent": round(mape, 2),
         "p50_error_seconds": round(p50, 1),
         "p90_error_seconds": round(p90, 1),
         "p99_error_seconds": round(p99, 1),
