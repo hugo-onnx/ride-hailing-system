@@ -1,4 +1,7 @@
-def assemble_eta_features(
+from datetime import datetime
+
+
+def assemble_pickup_features(
     trip_distance_km: float,
     features_5m: dict,
 ) -> dict:
@@ -22,4 +25,31 @@ def assemble_eta_features(
         "deadhead_km_avg": features_5m["deadhead_km_avg"],
         "available_drivers": features_5m["available_drivers"],
         "ride_requests": features_5m["ride_requests"],
+    }
+
+
+def assemble_dropoff_features(
+    trip_distance_km: float,
+    features_5m: dict,
+    ts: datetime,
+) -> dict:
+    """
+    Assemble feature vector for dropoff ETA prediction.
+    
+    Combines trip distance with time-based features and
+    market conditions for trip duration estimation.
+    
+    Args:
+        trip_distance_km: Estimated trip distance
+        features_5m: Derived features from 5-minute window
+        ts: Request timestamp
+    
+    Returns:
+        Feature dictionary ready for dropoff model prediction
+    """
+    return {
+        "trip_distance_km": trip_distance_km,
+        "surge_pressure": features_5m["surge_pressure"],
+        "hour_of_day": ts.hour,
+        "is_weekend": int(ts.weekday() >= 5),
     }
