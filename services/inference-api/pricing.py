@@ -39,7 +39,16 @@ def compute_price_multiplier(features_5m: dict) -> dict:
     # Clamp bounds
     multiplier = max(MIN_SURGE, min(MAX_SURGE, multiplier))
 
+    # Determine surge level for display
+    if multiplier >= 1.5:
+        surge_level = "high"
+    elif multiplier >= 1.2:
+        surge_level = "moderate"
+    else:
+        surge_level = "normal"
+
     return {
         "multiplier": round(multiplier, 3),
+        "surge_level": surge_level,
         "reasons": reasons,
     }
