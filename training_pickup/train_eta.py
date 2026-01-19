@@ -1,6 +1,7 @@
-import xgboost as xgb
 import joblib
 import pandas as pd
+import xgboost as xgb
+
 from pathlib import Path
 
 from data.schema import FEATURE_COLUMNS, LABEL_COLUMN

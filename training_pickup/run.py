@@ -1,7 +1,7 @@
 import argparse
-from pathlib import Path
-
 import pandas as pd
+
+from pathlib import Path
 
 from features.reconstruct import reconstruct_features
 from split import time_split
@@ -11,10 +11,10 @@ from data.schema import FEATURE_COLUMNS, LABEL_COLUMN
 
 
 DATA_PATH = "data/trips_madrid.parquet"
-MODEL_PATH = "../services/inference-api/models/eta_model.joblib"
+PICKUP_MODEL_PATH = "services/inference-api/models/eta_model.joblib"
 
 
-def main(data_path: str = DATA_PATH, model_path: str = MODEL_PATH):
+def main(data_path: str = DATA_PATH, model_path: str = PICKUP_MODEL_PATH):
     print(f"Loading data from {data_path}...")
     trips = pd.read_parquet(data_path)
     print(f"Loaded {len(trips)} trip records")
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--output", 
-        default=MODEL_PATH, 
+        default=PICKUP_MODEL_PATH, 
         help="Path to save trained model"
     )
     args = parser.parse_args()

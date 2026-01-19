@@ -22,7 +22,6 @@ def reconstruct_features(trips: pd.DataFrame) -> pd.DataFrame:
         "pickup_eta_seconds",
     ]].dropna()
 
-    # Guardrails (match inference bounds)
     features["pickup_eta_seconds"] = features[
         "pickup_eta_seconds"
     ].clip(120, 3600)

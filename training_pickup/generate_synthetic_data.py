@@ -1,8 +1,8 @@
 import argparse
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
+
+from pathlib import Path
 
 
 def generate_synthetic_trips(n_samples: int = 10000, seed: int = 42) -> pd.DataFrame:
