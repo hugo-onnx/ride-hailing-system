@@ -1,13 +1,13 @@
 import joblib
 import numpy as np
 
-ETA_MIN = 120
-ETA_MAX = 3600
+ETA_MIN_S = 120
+ETA_MAX_S = 3600
 
 
-class ETAEstimator:
+class PickupETAEstimator:
     """
-    ETA estimation model using XGBoost.
+    Pickup ETA estimation model using XGBoost.
     
     Predicts estimated time of arrival based on trip distance
     and marketplace features (supply/demand conditions).
@@ -43,4 +43,4 @@ class ETAEstimator:
         ]])
 
         eta = float(self.model.predict(x)[0])
-        return max(ETA_MIN, min(ETA_MAX, eta))
+        return max(ETA_MIN_S, min(ETA_MAX_S, eta))
