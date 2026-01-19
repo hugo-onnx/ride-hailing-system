@@ -7,7 +7,7 @@ from pathlib import Path
 
 def generate_synthetic_trips(n_samples: int = 10000, seed: int = 42) -> pd.DataFrame:
     """
-    Generate synthetic trip data with marketplace features.
+    Generate synthetic trip data for pickup ETA prediction.
     
     Args:
         n_samples: Number of trip records to generate
@@ -18,7 +18,6 @@ def generate_synthetic_trips(n_samples: int = 10000, seed: int = 42) -> pd.DataF
     """
     np.random.seed(seed)
     
-    # Generate timestamps over 30 days
     start_date = pd.Timestamp("2026-01-01")
     timestamps = pd.date_range(
         start=start_date, 
