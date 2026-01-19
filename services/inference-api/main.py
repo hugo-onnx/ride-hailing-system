@@ -15,9 +15,9 @@ from derive import derive_features
 from pricing import compute_price_multiplier
 from monitoring.metrics import record_latency
 from monitoring.drift import record_feature_snapshot
-from eta.pickup_model import ETAEstimator
+from eta.pickup_model import PickupETAEstimator
 from eta.dropoff_model import DropoffETAEstimator
-from eta.features import assemble_eta_features
+from eta.features import assemble_pickup_features, assemble_dropoff_features
 from geo.utils import haversine_km
 
 logging.basicConfig(
@@ -27,17 +27,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 redis_client: redis.Redis | None = None
-eta_model: ETAEstimator | None = None
+pickup_model: PickupETAEstimator | None = None
 dropoff_model: DropoffETAEstimator | None = None
 
-PICKUP_ETA_MODEL_PATH = "/app/models/eta_model.joblib"
-DROPOFF_ETA_MODEL_PATH = "/app/models/dropoff_model.joblib"
+PICKUP_MODEL_PATH = "/app/models/pickup_eta_model.joblib"
+DROPOFF_MODEL_PATH = "/app/models/dropoff_eta_model.joblib"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage Redis connection lifecycle."""
-    global redis_client, eta_model, dropoff_model
+    global redis_client, pickup_model, dropoff_model
     
     redis_client = redis.Redis(
         host=REDIS_HOST,
@@ -55,20 +55,20 @@ async def lifespan(app: FastAPI):
         raise
 
     try:
-        eta_model = ETAEstimator(PICKUP_ETA_MODEL_PATH)
-        logger.info(f"Loaded ETA model from {PICKUP_ETA_MODEL_PATH}")
+        pickup_model = PickupETAEstimator(PICKUP_MODEL_PATH)
+        logger.info(f"Loaded ETA model from {PICKUP_MODEL_PATH}")
     except FileNotFoundError:
-        logger.warning(f"ETA model not found at {PICKUP_ETA_MODEL_PATH}, ETA endpoint will be disabled")
-        eta_model = None
+        logger.warning(f"ETA model not found at {PICKUP_MODEL_PATH}, ETA endpoint will be disabled")
+        pickup_model = None
     except Exception as e:
         logger.error(f"Failed to load ETA model: {e}")
-        eta_model = None
+        pickup_model = None
 
     try:
-        dropoff_model = DropoffETAEstimator(DROPOFF_ETA_MODEL_PATH)
-        logger.info(f"Loaded Dropoff model from {DROPOFF_ETA_MODEL_PATH}")
+        dropoff_model = DropoffETAEstimator(DROPOFF_MODEL_PATH)
+        logger.info(f"Loaded Dropoff model from {DROPOFF_MODEL_PATH}")
     except FileNotFoundError:
-        logger.warning(f"Dropoff model not found at {DROPOFF_ETA_MODEL_PATH}, trip quote endpoint will be disabled")
+        logger.warning(f"Dropoff model not found at {DROPOFF_MODEL_PATH}, trip quote endpoint will be disabled")
         dropoff_model = None
     except Exception as e:
         logger.error(f"Failed to load Dropoff model: {e}")
@@ -330,7 +330,7 @@ def eta_quote(
     Returns:
         ETA prediction in seconds and minutes with latency
     """
-    if eta_model is None:
+    if pickup_model is None:
         raise HTTPException(
             status_code=503, 
             detail="ETA model not loaded. Please ensure model file exists."
@@ -364,12 +364,12 @@ def eta_quote(
 
     features_5m = derive_features(raw_5m)
 
-    eta_features = assemble_eta_features(
+    eta_features = assemble_pickup_features(
         trip_distance_km=trip_distance_km,
         features_5m=features_5m,
     )
 
-    eta_seconds = eta_model.predict(eta_features)
+    eta_seconds = pickup_model.predict(eta_features)
 
     latency_ms = (time.perf_counter() - start) * 1000
     record_latency(redis_client, "eta", latency_ms)
@@ -406,7 +406,7 @@ def trip_quote(
     Returns:
         Complete trip quote with ETAs and pricing
     """
-    if eta_model is None or dropoff_model is None:
+    if pickup_model is None or dropoff_model is None:
         raise HTTPException(
             status_code=503, 
             detail="ETA models not loaded. Please ensure model files exist."
@@ -449,19 +449,18 @@ def trip_quote(
     features_5m = derive_features(raw_5m)
 
     # --- PICKUP ETA ---
-    pickup_features = assemble_eta_features(
+    pickup_features = assemble_pickup_features(
         trip_distance_km=trip_distance_km,
         features_5m=features_5m,
     )
-    pickup_eta = eta_model.predict(pickup_features)
+    pickup_eta = pickup_model.predict(pickup_features)
 
     # --- DROPOFF ETA ---
-    dropoff_features = {
-        "trip_distance_km": trip_distance_km,
-        "surge_pressure": features_5m["surge_pressure"],
-        "hour_of_day": ts.hour,
-        "is_weekend": ts.weekday() >= 5,
-    }
+    dropoff_features = assemble_dropoff_features(
+        trip_distance_km=trip_distance_km,
+        features_5m=features_5m,
+        ts=ts,
+    )
     dropoff_eta = dropoff_model.predict(dropoff_features)
 
     # --- TOTAL ETA ---
