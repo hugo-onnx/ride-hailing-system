@@ -17,6 +17,7 @@ COPY services/inference-api/monitoring /app/monitoring
 COPY services/inference-api/eta /app/eta
 COPY services/inference-api/geo /app/geo
 COPY services/inference-api/models /app/models
+COPY services/inference-api/routing /app/routing
 
 ENV PYTHONPATH=/app
 
