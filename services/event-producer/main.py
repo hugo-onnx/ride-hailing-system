@@ -23,22 +23,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 KAFKA_CONFIG = {"bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS}
-
-# Topics
 RIDE_TOPIC = f"rides.requested.{CITY}"
 DRIVER_TOPIC = f"drivers.location.{CITY}"
-
-# H3 config
 H3_RESOLUTION = 8
-
-# Metrics port
 METRICS_PORT = 8001
 
-# =============================================================================
-# PROMETHEUS METRICS
-# =============================================================================
-
-# Counters - track totals
 RIDES_PRODUCED = Counter(
     'event_producer_rides_produced_total',
     'Total number of ride request events produced',
@@ -57,7 +46,6 @@ KAFKA_ERRORS = Counter(
     ['city', 'topic']
 )
 
-# Gauges - track current state
 ACTIVE_DRIVERS = Gauge(
     'event_producer_active_drivers',
     'Current number of simulated drivers',
@@ -70,7 +58,6 @@ BATCH_SIZE_GAUGE = Gauge(
     ['city']
 )
 
-# Histograms - track distributions
 PRODUCE_LATENCY = Histogram(
     'event_producer_produce_latency_seconds',
     'Time taken to produce a batch of events',
@@ -78,16 +65,11 @@ PRODUCE_LATENCY = Histogram(
     buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0]
 )
 
-# Summary - track rates
 EVENTS_PER_SECOND = Summary(
     'event_producer_events_per_second',
     'Events produced per second',
     ['city', 'type']
 )
-
-# =============================================================================
-# VOLUME CONFIGURATION
-# =============================================================================
 
 EVENT_INTERVAL = 0.5
 RIDES_PER_BATCH = 10
@@ -95,6 +77,30 @@ NUM_DRIVERS = 2000
 DRIVER_PING_INTERVAL = 5
 DRIVER_DRIFT_STRENGTH = 0.3
 DRIVER_MOVE_DELTA = 0.002
+
+# LOW VOLUME - Testing/Development
+# EVENT_INTERVAL = 1.0
+# RIDES_PER_BATCH = 1
+# NUM_DRIVERS = 200
+# DRIVER_PING_INTERVAL = 5
+
+# MEDIUM VOLUME - Normal day
+# EVENT_INTERVAL = 0.5
+# RIDES_PER_BATCH = 5
+# NUM_DRIVERS = 1000
+# DRIVER_PING_INTERVAL = 5
+
+# HIGH VOLUME - Rush hour (DEFAULT)
+# EVENT_INTERVAL = 0.5
+# RIDES_PER_BATCH = 10
+# NUM_DRIVERS = 2000
+# DRIVER_PING_INTERVAL = 5
+
+# EXTREME VOLUME - Peak demand
+# EVENT_INTERVAL = 0.25
+# RIDES_PER_BATCH = 20
+# NUM_DRIVERS = 3000
+# DRIVER_PING_INTERVAL = 3
 
 
 @dataclass
@@ -108,7 +114,7 @@ class Zone:
     driver_weight: float
 
 
-# Madrid demand zones
+
 MADRID_ZONES = [
     Zone("Sol-Gran Via", 40.4169, -3.7034, 0.8, demand_weight=20, driver_weight=25),
     Zone("Plaza Mayor", 40.4155, -3.7074, 0.5, demand_weight=12, driver_weight=15),
@@ -331,14 +337,12 @@ def update_driver_metrics(driver_sim: DriverSimulator):
 
 
 def main():
-    # Start Prometheus metrics server
     start_http_server(METRICS_PORT)
     logger.info(f"Prometheus metrics server started on port {METRICS_PORT}")
     
     producer = get_producer()
     driver_sim = DriverSimulator(NUM_DRIVERS, DRIVER_PING_INTERVAL, EVENT_INTERVAL)
     
-    # Set static metrics
     BATCH_SIZE_GAUGE.labels(city=CITY).set(RIDES_PER_BATCH)
     
     rides_per_min = RIDES_PER_BATCH / EVENT_INTERVAL * 60
@@ -364,7 +368,6 @@ def main():
         while True:
             batch_start = time.time()
             
-            # Produce ride events
             for _ in range(RIDES_PER_BATCH):
                 ride_event = generate_ride_event()
                 producer.produce(
@@ -375,7 +378,6 @@ def main():
                 total_rides += 1
                 RIDES_PRODUCED.labels(city=CITY, zone=ride_event["zone"]).inc()
             
-            # Produce driver events
             driver_events = driver_sim.generate_events()
             for event in driver_events:
                 producer.produce(
@@ -390,21 +392,17 @@ def main():
             producer.poll(0)
             batch_count += 1
             
-            # Record batch latency
             batch_duration = time.time() - batch_start
             PRODUCE_LATENCY.labels(city=CITY).observe(batch_duration)
             
-            # Update driver metrics every second
             if time.time() - last_metric_time >= 1.0:
                 update_driver_metrics(driver_sim)
                 last_metric_time = time.time()
             
-            # Log stats every 10 seconds
             if time.time() - last_log_time >= 10:
                 elapsed = time.time() - start_time
                 stats = driver_sim.get_stats()
                 
-                # Record rates
                 EVENTS_PER_SECOND.labels(city=CITY, type="rides").observe(total_rides / elapsed)
                 EVENTS_PER_SECOND.labels(city=CITY, type="driver_pings").observe(total_driver_pings / elapsed)
                 
@@ -416,7 +414,6 @@ def main():
                 )
                 last_log_time = time.time()
             
-            # Maintain interval
             sleep_time = max(0, EVENT_INTERVAL - batch_duration)
             if sleep_time > 0:
                 time.sleep(sleep_time)
